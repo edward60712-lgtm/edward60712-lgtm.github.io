@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>股票績效追蹤</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c; /* 深色背景 */
+        }
+        .table-input {
+            width: 100%;
+            background: transparent;
+            border: none;
+            text-align: right;
+            outline: none;
+            padding: 0.5rem;
+        }
+        .table-cell {
+            padding: 0.5rem;
+            text-align: right;
+        }
+        .modal-overlay {
+            background-color: rgba(0, 0, 0, 0.7);
+        }
+        tr[draggable="true"] {
+            cursor: move;
+        }
+        .dragging {
+            opacity: 0.5;
+            background-color: #3f4756;
+        }
+        .tab-btn.active {
+            border-bottom-color: #3b82f6;
+            color: #3b82f6;
+        }
+        .rename-btn, .delete-btn {
+            display: none;
+        }
+        .tab-btn:hover .rename-btn, .tab-btn:hover .delete-btn {
+            display: inline-block;
+        }
+        .disabled-input {
+            background-color: #374151;
+            cursor: not-allowed;
+            color: #9ca3af;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8 flex items-center justify-center min-h-screen">
+    <div class="w-full max-w-6xl bg-gray-800 rounded-xl shadow-lg p-6 md:p-8 relative">
+
+        <!-- Account Tabs -->
+        <div class="flex items-center justify-start overflow-x-auto space-x-2 mb-6 border-b border-gray-700">
+            <div id="account-tabs" class="flex items-center justify-start space-x-2 flex-grow">
+                <!-- Tabs will be rendered here -->
+            </div>
+            <button id="add-account-btn" class="py-1 px-3 rounded-full font-semibold transition-all duration-200 bg-blue-600 text-white hover:bg-blue-700 whitespace-nowrap">新增帳號</button>
+        </div>
+
+        <!-- Chart Container -->
+        <div class="mt-8 flex flex-col md:flex-row justify-center items-start gap-8">
+            <div class="w-full md:w-1/2 aspect-square">
+                <h2 class="text-2xl md:text-3xl font-bold text-center text-white mb-4">總市值圖表</h2>
+                <div class="w-full h-full">
+                    <canvas id="performanceChart"></canvas>
+                </div>
+            </div>
+            <div class="w-full md:w-1/2 aspect-square">
+                <h2 class="text-2xl md:text-3xl font-bold text-center text-white mb-4">總損益圖表</h2>
+                <div class="w-full h-full">
+                    <canvas id="profitLossChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Historical Data Table -->
+        <h2 class="text-2xl md:text-3xl font-bold text-center text-white mb-4 mt-8">歷史績效</h2>
+        <div class="overflow-x-auto overflow-y-auto h-80 rounded-lg shadow-sm border border-gray-700">
+            <table class="min-w-full divide-y divide-gray-700">
+                <thead class="bg-gray-700 sticky top-0">
+                    <tr>
+                        <th scope="col" class="px-3 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider">刪除</th>
+                        <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">日期</th>
+                        <th scope="col" class="px-3 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">總市值 ($)</th>
+                        <th scope="col" class="px-3 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">總投入本金 ($)</th>
+                        <th scope="col" class="px-3 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">總損益 ($)</th>
+                        <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">股票細項</th>
+                    </tr>
+                </thead>
+                <tbody id="history-data-body" class="bg-gray-800 divide-y divide-gray-700">
+                    <!-- Historical data will be populated here -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 總投入本金輸入區塊 -->
+        <div class="flex items-center justify-center mb-6 mt-8">
+            <label for="total-principal-input" class="text-gray-200 font-bold mr-4">總投入本金 ($):</label>
+            <input type="number" id="total-principal-input" class="rounded-lg border border-gray-600 p-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 w-48 text-right bg-gray-700" placeholder="總本金" value="0" min="0" step="0.01">
+        </div>
+
+        <div class="overflow-x-auto rounded-lg shadow-sm border border-gray-700 mb-4">
+            <table class="min-w-full divide-y divide-gray-700">
+                <thead class="bg-gray-700">
+                    <tr>
+                        <th scope="col" class="px-3 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider">刪除</th>
+                        <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">股票代號</th>
+                        <th scope="col" class="px-3 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">持有股數</th>
+                        <th scope="col" class="px-3 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">持有成本 ($)</th>
+                        <th scope="col" class="px-3 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">當前市價 ($)</th>
+                        <th scope="col" class="px-3 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">總市值 ($)</th>
+                        <th scope="col" class="px-3 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">總成本 ($)</th>
+                        <th scope="col" class="px-3 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">漲跌幅 (%)</th>
+                    </tr>
+                </thead>
+                <tbody id="stock-data-body" class="bg-gray-800 divide-y divide-gray-700">
+                    <!-- Stock data will be populated here by JavaScript -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 新增股票區塊 -->
+        <div class="mt-8 flex items-center justify-center space-x-4 mb-4">
+            <button id="add-stock-button" class="py-1.5 px-3 rounded-full font-semibold transition-all duration-200 bg-blue-600 text-white hover:bg-blue-700 hover:shadow-md whitespace-nowrap">新增股票</button>
+            <input type="text" id="new-ticker" placeholder="股票代號 (例: GOOG)" class="rounded-lg border border-gray-600 p-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1 bg-gray-700">
+            <input type="number" id="new-shares" placeholder="持有股數" min="0" class="rounded-lg border border-gray-600 p-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1 bg-gray-700">
+            <input type="number" id="new-cost" placeholder="持有成本" min="0" step="0.01" class="rounded-lg border border-gray-600 p-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1 bg-gray-700">
+        </div>
+        
+        <!-- 記錄本週績效區塊 -->
+        <div class="flex flex-col md:flex-row items-center justify-start space-y-4 md:space-y-0 md:space-x-4 mb-8">
+            <button id="save-data-button" class="py-1.5 px-3 rounded-full font-semibold transition-all duration-200 bg-blue-600 text-white hover:bg-blue-700 hover:shadow-md w-full md:w-40">記錄本週績效</button>
+            <label for="record-date" class="text-gray-200 font-medium">記錄日期:</label>
+            <input type="date" id="record-date" class="rounded-lg border border-gray-600 p-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 w-full md:w-auto bg-gray-700">
+        </div>
+
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirmation-modal" class="fixed inset-0 flex items-center justify-center p-4 z-50 hidden modal-overlay">
+        <div class="bg-gray-800 p-6 rounded-xl shadow-lg w-full max-w-sm border border-gray-700">
+            <h3 class="text-xl font-bold text-white mb-4">確認刪除</h3>
+            <p id="confirm-text" class="text-gray-300 mb-6"></p>
+            <div class="flex justify-end space-x-4">
+                <button id="cancel-delete-btn" class="py-2 px-4 rounded-full font-semibold transition-all duration-200 bg-gray-600 text-white hover:bg-gray-700">取消</button>
+                <button id="confirm-delete-btn" class="py-2 px-4 rounded-full font-semibold transition-all duration-200 bg-red-600 text-white hover:bg-red-700">確定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- General Message Modal -->
+    <div id="message-modal" class="fixed inset-0 flex items-center justify-center p-4 z-50 hidden modal-overlay">
+        <div class="bg-gray-800 p-6 rounded-xl shadow-lg w-full max-w-sm border border-gray-700">
+            <h3 id="message-title" class="text-xl font-bold text-white mb-4"></h3>
+            <p id="message-text" class="text-gray-300 mb-6"></p>
+            <div class="flex justify-end space-x-4">
+                <button id="close-message-btn" class="py-2 px-4 rounded-full font-semibold transition-all duration-200 bg-blue-600 text-white hover:bg-blue-700">確定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Account Modal -->
+    <div id="add-account-modal" class="fixed inset-0 flex items-center justify-center p-4 z-50 hidden modal-overlay">
+        <div class="bg-gray-800 p-6 rounded-xl shadow-lg w-full max-w-sm border border-gray-700">
+            <h3 class="text-xl font-bold text-white mb-4">新增帳號</h3>
+            <p class="text-gray-300 mb-4">請輸入新的帳號名稱：</p>
+            <input type="text" id="new-account-name-input" class="rounded-lg border border-gray-600 p-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 w-full mb-4 bg-gray-700" placeholder="帳號名稱">
+            <div class="flex justify-end space-x-4">
+                <button id="cancel-add-account-btn" class="py-2 px-4 rounded-full font-semibold transition-all duration-200 bg-gray-600 text-white hover:bg-gray-700">取消</button>
+                <button id="confirm-add-account-btn" class="py-2 px-4 rounded-full font-semibold transition-all duration-200 bg-blue-600 text-white hover:bg-blue-700">確定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rename Account Modal -->
+    <div id="rename-account-modal" class="fixed inset-0 flex items-center justify-center p-4 z-50 hidden modal-overlay">
+        <div class="bg-gray-800 p-6 rounded-xl shadow-lg w-full max-w-sm border border-gray-700">
+            <h3 class="text-xl font-bold text-white mb-4">重新命名帳號</h3>
+            <p class="text-gray-300 mb-4">請輸入新的帳號名稱：</p>
+            <input type="text" id="rename-account-name-input" class="rounded-lg border border-gray-600 p-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 w-full mb-4 bg-gray-700" placeholder="新帳號名稱">
+            <div class="flex justify-end space-x-4">
+                <button id="cancel-rename-btn" class="py-2 px-4 rounded-full font-semibold transition-all duration-200 bg-gray-600 text-white hover:bg-gray-700">取消</button>
+                <button id="confirm-rename-btn" class="py-2 px-4 rounded-full font-semibold transition-all duration-200 bg-blue-600 text-white hover:bg-blue-700">確定</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables for data management
+        const TOTAL_ACCOUNT_NAME = '總績效';
+        let allAccounts = {}; // Stores all account data
+        let currentAccount = '我的第一個帳號'; // The currently active account
+        let performanceChartInstance = null; // Chart.js instance for performance chart
+        let profitLossChartInstance = null; // Chart.js instance for profit/loss chart
+        let draggedItem = null; // For drag and drop functionality
+        let itemToDeleteType = null; // 'stock' or 'history'
+        let itemToDeleteIndex = null; // Index of the item to delete
+        
+        // DOM Elements
+        const stockBody = document.getElementById('stock-data-body');
+        const totalPrincipalInput = document.getElementById('total-principal-input');
+        const historyBody = document.getElementById('history-data-body');
+        const saveDataButton = document.getElementById('save-data-button');
+        const dateInput = document.getElementById('record-date');
+        const addStockButton = document.getElementById('add-stock-button');
+        const newTickerInput = document.getElementById('new-ticker');
+        const newSharesInput = document.getElementById('new-shares');
+        const newCostInput = document.getElementById('new-cost');
+        
+        // Account Tab Elements
+        const accountTabsContainer = document.getElementById('account-tabs');
+        const addAccountBtn = document.getElementById('add-account-btn');
+        
+        // Modal Elements
+        const confirmationModal = document.getElementById('confirmation-modal');
+        const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
+        const cancelDeleteBtn = document.getElementById('cancel-delete-btn');
+        const confirmText = document.getElementById('confirm-text');
+
+        const messageModal = document.getElementById('message-modal');
+        const messageTitle = document.getElementById('message-title');
+        const messageText = document.getElementById('message-text');
+        const closeMessageBtn = document.getElementById('close-message-btn');
+
+        const addAccountModal = document.getElementById('add-account-modal');
+        const newAccountNameInput = document.getElementById('new-account-name-input');
+        const confirmAddAccountBtn = document.getElementById('confirm-add-account-btn');
+        const cancelAddAccountBtn = document.getElementById('cancel-add-account-btn');
+
+        const renameAccountModal = document.getElementById('rename-account-modal');
+        const renameAccountNameInput = document.getElementById('rename-account-name-input');
+        const confirmRenameBtn = document.getElementById('confirm-rename-btn');
+        const cancelRenameBtn = document.getElementById('cancel-rename-btn');
+        let accountToRename = null;
+
+        // --- Core Functions ---
+
+        // Show generic message modal
+        function showMessage(title, text) {
+            messageTitle.textContent = title;
+            messageText.textContent = text;
+            messageModal.classList.remove('hidden');
+        }
+
+        // Hide generic message modal
+        function hideMessage() {
+            messageModal.classList.add('hidden');
+        }
+
+        // Show confirmation modal
+        function showConfirmation(text, type, index) {
+            confirmText.textContent = text;
+            itemToDeleteType = type;
+            itemToDeleteIndex = index;
+            confirmationModal.classList.remove('hidden');
+        }
+
+        // Hide confirmation modal
+        function hideConfirmation() {
+            confirmationModal.classList.add('hidden');
+            itemToDeleteType = null;
+            itemToDeleteIndex = null;
+        }
+
+        // Show rename account modal
+        function showRenameModal(name) {
+            accountToRename = name;
+            renameAccountNameInput.value = name;
+            renameAccountModal.classList.remove('hidden');
+        }
+
+        // Hide rename account modal
+        function hideRenameModal() {
+            renameAccountModal.classList.add('hidden');
+        }
+
+        // Renders all account tabs
+        function renderAccountTabs() {
+            accountTabsContainer.innerHTML = '';
+            // Filter out the total performance account for regular tabs
+            const regularAccountNames = Object.keys(allAccounts).filter(name => name !== TOTAL_ACCOUNT_NAME);
+
+            // Manually add the Total Performance tab first
+            const totalTabBtn = document.createElement('button');
+            totalTabBtn.className = `tab-btn px-4 py-2 text-sm font-medium transition-all duration-200 border-b-2 ${currentAccount === TOTAL_ACCOUNT_NAME ? 'active border-blue-600 text-blue-600' : 'border-transparent text-gray-400 hover:text-white hover:border-gray-500'}`;
+            totalTabBtn.textContent = TOTAL_ACCOUNT_NAME;
+            totalTabBtn.addEventListener('click', () => switchAccount(TOTAL_ACCOUNT_NAME));
+            accountTabsContainer.appendChild(totalTabBtn);
+
+            regularAccountNames.forEach(name => {
+                const isActive = name === currentAccount;
+                const tabButton = document.createElement('button');
+                tabButton.className = `tab-btn px-4 py-2 text-sm font-medium transition-all duration-200 border-b-2 ${isActive ? 'active border-blue-600 text-blue-600' : 'border-transparent text-gray-400 hover:text-white hover:border-gray-500'}`;
+                tabButton.textContent = name;
+                tabButton.addEventListener('click', () => switchAccount(name));
+                
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'text-red-500 ml-2 hover:text-red-700 delete-btn';
+                deleteBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm6 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" />
+                    </svg>
+                `;
+                deleteBtn.title = `刪除帳號: ${name}`;
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation(); // Prevents switching account
+                    showConfirmation(`您確定要刪除帳號「${name}」嗎？此操作無法復原。`, 'account', name);
+                });
+                
+                const renameBtn = document.createElement('button');
+                renameBtn.className = 'text-gray-400 ml-1 hover:text-white rename-btn';
+                renameBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                    </svg>
+                `;
+                renameBtn.title = `重新命名帳號: ${name}`;
+                renameBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    showRenameModal(name);
+                });
+                
+                tabButton.appendChild(renameBtn);
+                if (regularAccountNames.length > 1) {
+                    tabButton.appendChild(deleteBtn);
+                }
+                
+                accountTabsContainer.appendChild(tabButton);
+            });
+        }
+
+        // Switches the current account
+        function switchAccount(accountName) {
+            currentAccount = accountName;
+            loadData();
+        }
+
+        // Renders the main stock table for the current account
+        function renderCurrentTable() {
+            const currentStocks = allAccounts[currentAccount].stocks;
+            const currentPrincipal = allAccounts[currentAccount].totalPrincipal;
+            const isTotalAccount = currentAccount === TOTAL_ACCOUNT_NAME;
+
+            totalPrincipalInput.value = currentPrincipal.toFixed(2);
+            totalPrincipalInput.disabled = isTotalAccount;
+            if (isTotalAccount) {
+                totalPrincipalInput.classList.add('disabled-input');
+            } else {
+                totalPrincipalInput.classList.remove('disabled-input');
+            }
+
+            stockBody.innerHTML = '';
+            if (currentStocks.length === 0) {
+                stockBody.innerHTML = '<tr><td colspan="8" class="text-center text-gray-500 py-4">目前沒有股票數據，請新增股票。</td></tr>';
+                return;
+            }
+            
+            currentStocks.forEach((stock, index) => {
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-700';
+                const totalValue = stock.shares * stock.price;
+                const totalCost = stock.shares * stock.cost;
+                const change = stock.cost > 0 ? ((stock.price - stock.cost) / stock.cost) * 100 : 0;
+
+                row.innerHTML = `
+                    <td class="px-3 py-2 text-center">
+                        <button onclick="promptRemoveStock(${index})" class="text-lg text-red-500 hover:text-red-700 font-bold leading-none ${isTotalAccount ? 'hidden' : ''}">X</button>
+                    </td>
+                    <td class="px-3 py-2 text-left text-sm text-gray-200">${stock.ticker}</td>
+                    <td class="px-3 py-2">
+                        <input type="number" value="${stock.shares}" class="table-input text-gray-200 ${isTotalAccount ? 'disabled-input' : ''}" data-index="${index}" data-type="shares" min="0" ${isTotalAccount ? 'disabled' : ''}>
+                    </td>
+                    <td class="px-3 py-2">
+                        <input type="number" value="${stock.cost}" class="table-input text-gray-200 ${isTotalAccount ? 'disabled-input' : ''}" data-index="${index}" data-type="cost" min="0" step="0.01" ${isTotalAccount ? 'disabled' : ''}>
+                    </td>
+                    <td class="px-3 py-2">
+                        <input type="number" value="${stock.price}" class="table-input text-gray-200 ${isTotalAccount ? 'disabled-input' : ''}" data-index="${index}" data-type="price" min="0" step="0.01" ${isTotalAccount ? 'disabled' : ''}>
+                    </td>
+                    <td class="px-3 py-2 table-cell text-sm text-gray-200 font-medium total-value">${totalValue.toFixed(2)}</td>
+                    <td class="px-3 py-2 table-cell text-sm text-gray-400 total-cost">${totalCost.toFixed(2)}</td>
+                    <td class="px-3 py-2 table-cell text-sm ${change >= 0 ? 'text-green-500' : 'text-red-500'}">
+                        ${change >= 0 ? '+' : ''}${change.toFixed(2)}%
+                    </td>
+                `;
+                row.classList.toggle('bg-gray-700', isTotalAccount);
+                stockBody.appendChild(row);
+            });
+        }
+        
+        // Show confirmation for stock removal
+        function promptRemoveStock(index) {
+            showConfirmation(`您確定要刪除這支股票嗎？`, 'stock', index);
+        }
+        window.promptRemoveStock = promptRemoveStock;
+
+        // Renders the history table for the current account
+        function renderHistoryTable() {
+            const historyData = allAccounts[currentAccount].history;
+            historyBody.innerHTML = '';
+            if (historyData.length === 0) {
+                historyBody.innerHTML = '<tr><td colspan="6" class="text-center text-gray-500 py-4">目前沒有歷史記錄。</td></tr>';
+                return;
+            }
+            const isTotalAccount = currentAccount === TOTAL_ACCOUNT_NAME;
+            historyData.forEach((entry, index) => {
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-700';
+                row.setAttribute('draggable', isTotalAccount ? 'false' : 'true');
+                row.dataset.date = entry.date;
+                const stockDetails = entry.stocks.map(s => `${s.ticker}: ${s.shares} 股 (成本 ${s.cost.toFixed(2)})`).join('<br>');
+                const profitLoss = entry.totalValue - entry.totalPrincipal;
+                row.innerHTML = `
+                    <td class="px-3 py-2 text-center">
+                        <button onclick="promptRemoveHistory(${index})" class="text-lg text-red-500 hover:text-red-700 font-bold leading-none ${isTotalAccount ? 'hidden' : ''}">X</button>
+                    </td>
+                    <td class="px-3 py-2 text-left text-sm text-gray-200">${entry.date}</td>
+                    <td class="px-3 py-2 text-right text-sm text-gray-200 font-medium">${entry.totalValue.toFixed(2)}</td>
+                    <td class="px-3 py-2 text-right text-sm text-gray-200 font-medium">${entry.totalPrincipal.toFixed(2)}</td>
+                    <td class="px-3 py-2 text-right text-sm font-medium ${profitLoss >= 0 ? 'text-green-500' : 'text-red-500'}">
+                        ${profitLoss.toFixed(2)}
+                    </td>
+                    <td class="px-3 py-2 text-left text-sm text-gray-400">${stockDetails}</td>
+                `;
+                row.classList.toggle('bg-gray-700', isTotalAccount);
+                historyBody.appendChild(row);
+            });
+        }
+
+        // Show confirmation for history entry removal
+        function promptRemoveHistory(index) {
+            showConfirmation(`您確定要刪除此筆歷史紀錄嗎？`, 'history', index);
+        }
+        window.promptRemoveHistory = promptRemoveHistory;
+
+        // Perform the actual deletion based on type and index
+        function performDeletion() {
+            if (itemToDeleteType === 'stock') {
+                allAccounts[currentAccount].stocks.splice(itemToDeleteIndex, 1);
+            } else if (itemToDeleteType === 'history') {
+                allAccounts[currentAccount].history.splice(itemToDeleteIndex, 1);
+            } else if (itemToDeleteType === 'account') {
+                if (Object.keys(allAccounts).length > 2) { // 2 instead of 1 because of TOTAL_ACCOUNT
+                    delete allAccounts[itemToDeleteIndex];
+                    currentAccount = Object.keys(allAccounts).filter(name => name !== TOTAL_ACCOUNT_NAME)[0];
+                } else {
+                    showMessage('無法刪除', '至少需要保留一個帳號。');
+                    hideConfirmation();
+                    return;
+                }
+            }
+            saveAllAccounts();
+            loadData();
+            hideConfirmation();
+        }
+
+        // Renders both charts for the current account
+        function renderCharts() {
+            const historyData = allAccounts[currentAccount].history;
+            const sortedForChart = [...historyData].sort((a, b) => new Date(a.date) - new Date(b.date));
+            const dates = sortedForChart.map(entry => entry.date);
+            const values = sortedForChart.map(entry => entry.totalValue);
+            const profitLosses = sortedForChart.map(entry => entry.totalValue - entry.totalPrincipal);
+
+            const performanceCtx = document.getElementById('performanceChart').getContext('2d');
+            const performanceChartData = {
+                labels: dates,
+                datasets: [{
+                    label: '總市值 ($)',
+                    data: values,
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                    fill: true,
+                    tension: 0.1
+                }]
+            };
+
+            const profitLossCtx = document.getElementById('profitLossChart').getContext('2d');
+            const profitLossChartData = {
+                labels: dates,
+                datasets: [{
+                    label: '總損益 ($)',
+                    data: profitLosses,
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                    fill: true,
+                    tension: 0.1
+                }]
+            };
+
+            const chartOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        ticks: { color: '#d1d5db' },
+                        grid: { color: '#4b5563' },
+                    },
+                    y: {
+                        ticks: { color: '#d1d5db' },
+                        grid: { color: '#4b5563' },
+                    }
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: '#d1d5db' }
+                    }
+                }
+            };
+            
+            if (performanceChartInstance) {
+                performanceChartInstance.data = performanceChartData;
+                performanceChartInstance.update();
+            } else {
+                performanceChartInstance = new Chart(performanceCtx, { type: 'line', data: performanceChartData, options: chartOptions });
+            }
+
+            if (profitLossChartInstance) {
+                profitLossChartInstance.data = profitLossChartData;
+                profitLossChartInstance.update();
+            } else {
+                profitLossChartInstance = new Chart(profitLossCtx, { type: 'line', data: profitLossChartData, options: chartOptions });
+            }
+        }
+        
+        // Save all accounts data to localStorage
+        function saveAllAccounts() {
+            try {
+                // Do not save the derived total performance account
+                const accountsToSave = { ...allAccounts };
+                delete accountsToSave[TOTAL_ACCOUNT_NAME];
+                localStorage.setItem('allAccounts', JSON.stringify(accountsToSave));
+                localStorage.setItem('currentAccount', currentAccount);
+                console.log("All data saved to localStorage.");
+            } catch (e) {
+                console.error("Failed to save data to localStorage:", e);
+            }
+        }
+
+        // Debounce function to prevent frequent saves
+        function debounce(func, delay) {
+            let timeoutId;
+            return (...args) => {
+                clearTimeout(timeoutId);
+                timeoutId = setTimeout(() => {
+                    func.apply(this, args);
+                }, delay);
+            };
+        }
+        const debouncedSave = debounce(saveAllAccounts, 500);
+
+        // Calculates and aggregates the total performance from all other accounts
+        function calculateTotalPerformance() {
+            const aggregatedStocks = {};
+            const aggregatedHistory = {};
+            let totalPrincipal = 0;
+
+            const regularAccountNames = Object.keys(allAccounts).filter(name => name !== TOTAL_ACCOUNT_NAME);
+
+            regularAccountNames.forEach(accountName => {
+                const accountData = allAccounts[accountName];
+                totalPrincipal += (accountData.totalPrincipal || 0);
+
+                // Aggregate stocks
+                accountData.stocks.forEach(stock => {
+                    if (!aggregatedStocks[stock.ticker]) {
+                        aggregatedStocks[stock.ticker] = {
+                            ticker: stock.ticker,
+                            shares: 0,
+                            cost: 0,
+                            price: 0
+                        };
+                    }
+                    const currentAggregated = aggregatedStocks[stock.ticker];
+                    const totalShares = currentAggregated.shares + stock.shares;
+                    // Recalculate weighted average cost and price
+                    currentAggregated.cost = (currentAggregated.shares * currentAggregated.cost + stock.shares * stock.cost) / totalShares;
+                    currentAggregated.price = (currentAggregated.shares * currentAggregated.price + stock.shares * stock.price) / totalShares;
+                    currentAggregated.shares = totalShares;
+                });
+
+                // Aggregate history by date
+                accountData.history.forEach(entry => {
+                    if (!aggregatedHistory[entry.date]) {
+                        aggregatedHistory[entry.date] = {
+                            date: entry.date,
+                            totalValue: 0,
+                            totalPrincipal: 0,
+                            stocks: {} // Temp object to aggregate stock details
+                        };
+                    }
+                    const currentHistory = aggregatedHistory[entry.date];
+                    currentHistory.totalValue += entry.totalValue;
+                    currentHistory.totalPrincipal += entry.totalPrincipal;
+
+                    // Aggregate stocks within history entry
+                    entry.stocks.forEach(stock => {
+                        if (!currentHistory.stocks[stock.ticker]) {
+                            currentHistory.stocks[stock.ticker] = { ticker: stock.ticker, shares: 0, cost: 0 };
+                        }
+                        const historyStock = currentHistory.stocks[stock.ticker];
+                        const totalShares = historyStock.shares + stock.shares;
+                        historyStock.cost = (historyStock.shares * historyStock.cost + stock.shares * stock.cost) / totalShares;
+                        historyStock.shares = totalShares;
+                    });
+                });
+            });
+
+            const finalStocks = Object.values(aggregatedStocks).map(stock => {
+                const change = stock.cost > 0 ? ((stock.price - stock.cost) / stock.cost) * 100 : 0;
+                return { ...stock, change };
+            });
+
+            const finalHistory = Object.values(aggregatedHistory).map(entry => {
+                const stocksArray = Object.values(entry.stocks);
+                return { ...entry, stocks: stocksArray };
+            }).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+            allAccounts[TOTAL_ACCOUNT_NAME] = {
+                stocks: finalStocks,
+                totalPrincipal: totalPrincipal,
+                history: finalHistory
+            };
+        }
+
+        // Load all data from localStorage
+        function loadData() {
+            try {
+                const savedAccounts = JSON.parse(localStorage.getItem('allAccounts'));
+                const lastAccount = localStorage.getItem('currentAccount');
+                
+                if (savedAccounts && Object.keys(savedAccounts).length > 0) {
+                    allAccounts = savedAccounts;
+                    currentAccount = lastAccount && allAccounts[lastAccount] ? lastAccount : Object.keys(allAccounts)[0];
+                } else {
+                    // Create a default account if no data exists
+                    allAccounts = {
+                        '我的第一個帳號': {
+                            stocks: [
+                                { ticker: 'TSLA', shares: 10, cost: 240.00, price: 250.50 },
+                                { ticker: 'NVDA', shares: 5, cost: 900.00, price: 920.75 },
+                                { ticker: 'GOOG', shares: 20, cost: 150.00, price: 155.00 },
+                            ],
+                            totalPrincipal: 0,
+                            history: [],
+                        }
+                    };
+                    currentAccount = '我的第一個帳號';
+                    saveAllAccounts();
+                }
+            } catch (e) {
+                console.error("Failed to load data from localStorage:", e);
+                // Reset to default on error
+                allAccounts = {
+                    '我的第一個帳號': {
+                        stocks: [],
+                        totalPrincipal: 0,
+                        history: [],
+                    }
+                };
+                currentAccount = '我的第一個帳號';
+            }
+
+            calculateTotalPerformance();
+
+            // Render UI based on loaded data
+            renderAccountTabs();
+            renderCurrentTable();
+            renderHistoryTable();
+            renderCharts();
+        }
+
+        // Event Listeners
+        
+        // Handle input changes on stock table
+        stockBody.addEventListener('input', (event) => {
+            const input = event.target;
+            if (input.classList.contains('table-input')) {
+                const index = parseInt(input.dataset.index);
+                const type = input.dataset.type;
+                const value = parseFloat(input.value);
+
+                if (!isNaN(value)) {
+                    allAccounts[currentAccount].stocks[index][type] = value;
+                    if (type === 'price' || type === 'cost') {
+                        // Re-calculate change
+                        const stock = allAccounts[currentAccount].stocks[index];
+                        stock.change = stock.cost > 0 ? ((stock.price - stock.cost) / stock.cost) * 100 : 0;
+                    }
+                }
+                renderCurrentTable(); // Re-render to update calculated fields
+                debouncedSave();
+                loadData();
+            }
+        });
+        
+        // Handle total principal change
+        totalPrincipalInput.addEventListener('input', () => {
+            allAccounts[currentAccount].totalPrincipal = parseFloat(totalPrincipalInput.value) || 0;
+            debouncedSave();
+            loadData();
+        });
+
+        // Add new stock
+        addStockButton.addEventListener('click', () => {
+            const newTicker = newTickerInput.value.toUpperCase().trim();
+            const newShares = parseFloat(newSharesInput.value);
+            const newCost = parseFloat(newCostInput.value);
+
+            if (currentAccount === TOTAL_ACCOUNT_NAME) {
+                 showMessage("無法操作", "請在個別帳號頁面進行操作。");
+                 return;
+            }
+
+            if (newTicker === '' || isNaN(newShares) || isNaN(newCost)) {
+                showMessage("輸入錯誤", "請檢查您的輸入是否正確。");
+                return;
+            }
+
+            const currentStocks = allAccounts[currentAccount].stocks;
+            const existingStockIndex = currentStocks.findIndex(s => s.ticker === newTicker);
+            if (existingStockIndex !== -1) {
+                showMessage("股票已存在", "該股票代號已存在，請直接修改持有股數或成本。");
+                return;
+            }
+
+            const newStock = {
+                ticker: newTicker,
+                shares: newShares,
+                cost: newCost,
+                price: newCost,
+                change: 0
+            };
+            currentStocks.push(newStock);
+            renderCurrentTable();
+            newTickerInput.value = '';
+            newSharesInput.value = '';
+            newCostInput.value = '';
+            saveAllAccounts();
+            loadData();
+        });
+
+        // Save current performance to history
+        saveDataButton.addEventListener('click', () => {
+            if (currentAccount === TOTAL_ACCOUNT_NAME) {
+                 showMessage("無法操作", "「總績效」為自動匯總頁面，無法手動記錄。");
+                 return;
+            }
+
+            const currentStocks = allAccounts[currentAccount].stocks;
+            const totalValue = currentStocks.reduce((sum, stock) => sum + (stock.shares * (stock.price || 0)), 0);
+            const totalPrincipal = parseFloat(totalPrincipalInput.value) || 0;
+            const date = dateInput.value ? dateInput.value.replace(/-/g, '/') : new Date().toLocaleDateString('zh-TW');
+
+            const historyData = allAccounts[currentAccount].history;
+            const currentEntry = {
+                date,
+                totalValue,
+                totalPrincipal,
+                stocks: currentStocks.map(stock => ({
+                    ticker: stock.ticker,
+                    shares: stock.shares,
+                    cost: stock.cost
+                }))
+            };
+
+            const existingIndex = historyData.findIndex(entry => entry.date === date);
+            if (existingIndex !== -1) {
+                historyData[existingIndex] = currentEntry;
+            } else {
+                historyData.push(currentEntry);
+            }
+
+            saveAllAccounts();
+            loadData();
+            showMessage("成功記錄", "本週績效已成功記錄。");
+        });
+        
+        // Modal Event Listeners
+        confirmDeleteBtn.addEventListener('click', performDeletion);
+        cancelDeleteBtn.addEventListener('click', hideConfirmation);
+        closeMessageBtn.addEventListener('click', hideMessage);
+
+        addAccountBtn.addEventListener('click', () => {
+            newAccountNameInput.value = '';
+            addAccountModal.classList.remove('hidden');
+        });
+
+        confirmAddAccountBtn.addEventListener('click', () => {
+            const newName = newAccountNameInput.value.trim();
+            if (newName === '' || newName === TOTAL_ACCOUNT_NAME) {
+                showMessage('輸入錯誤', '帳號名稱不能為空或「總績效」。');
+                return;
+            }
+            if (allAccounts[newName]) {
+                showMessage('名稱已存在', '此帳號名稱已存在，請使用其他名稱。');
+                return;
+            }
+            allAccounts[newName] = {
+                stocks: [],
+                totalPrincipal: 0,
+                history: []
+            };
+            currentAccount = newName;
+            saveAllAccounts();
+            addAccountModal.classList.add('hidden');
+            loadData();
+            showMessage('成功新增', `帳號「${newName}」已新增！`);
+        });
+
+        cancelAddAccountBtn.addEventListener('click', () => {
+            addAccountModal.classList.add('hidden');
+        });
+
+        confirmRenameBtn.addEventListener('click', () => {
+            const newName = renameAccountNameInput.value.trim();
+            if (newName === '' || newName === TOTAL_ACCOUNT_NAME) {
+                showMessage('輸入錯誤', '帳號名稱不能為空或「總績效」。');
+                return;
+            }
+            if (newName === accountToRename) {
+                hideRenameModal();
+                return;
+            }
+            if (allAccounts[newName]) {
+                showMessage('名稱已存在', '此帳號名稱已存在，請使用其他名稱。');
+                return;
+            }
+            
+            // Rename the account
+            allAccounts[newName] = allAccounts[accountToRename];
+            delete allAccounts[accountToRename];
+            currentAccount = newName;
+            
+            saveAllAccounts();
+            hideRenameModal();
+            loadData();
+            showMessage('成功重新命名', `帳號已重新命名為「${newName}」。`);
+        });
+        
+        cancelRenameBtn.addEventListener('click', () => {
+            hideRenameModal();
+        });
+
+
+        // Drag and Drop (History Table)
+        historyBody.addEventListener('dragstart', (e) => {
+            if (currentAccount === TOTAL_ACCOUNT_NAME) {
+                e.preventDefault();
+                return;
+            }
+            const row = e.target.closest('tr');
+            if (row) {
+                draggedItem = row;
+                e.dataTransfer.effectAllowed = 'move';
+                row.classList.add('dragging');
+            }
+        });
+
+        historyBody.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            const targetRow = e.target.closest('tr');
+            if (targetRow && targetRow !== draggedItem) {
+                const rect = targetRow.getBoundingClientRect();
+                const isAfter = e.clientY > rect.top + rect.height / 2;
+                historyBody.insertBefore(draggedItem, isAfter ? targetRow.nextSibling : targetRow);
+            }
+        });
+
+        historyBody.addEventListener('dragend', (e) => {
+            if (draggedItem) {
+                draggedItem.classList.remove('dragging');
+                draggedItem = null;
+                // Reorder the history data in the current account based on the new DOM order
+                const historyData = allAccounts[currentAccount].history;
+                const newOrder = Array.from(historyBody.querySelectorAll('tr')).map(row => row.dataset.date);
+                const reorderedHistory = newOrder.map(date => historyData.find(entry => entry.date === date));
+                allAccounts[currentAccount].history = reorderedHistory;
+                saveAllAccounts();
+                loadData();
+            }
+        });
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', loadData);
+    </script>
+</body>
+</html>
